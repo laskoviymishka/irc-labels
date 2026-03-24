@@ -1,0 +1,105 @@
+services:
+  # S3-compatible storage for Iceberg data files
+  minio:
+    image: minio/minio:latest
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: password
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Create default bucket on startup
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set myminio http://minio:9000 admin password;
+      mc mb myminio/warehouse --ignore-existing;
+      mc anonymous set public myminio/warehouse;
+      echo 'MinIO bucket ready';
+      "
+
+  # Unity Catalog OSS — Iceberg REST Catalog
+  uc:
+    image: unitycatalog/unitycatalog:latest
+    ports:
+      - "8080:8080"
+    environment:
+      AWS_ACCESS_KEY_ID: admin
+      AWS_SECRET_ACCESS_KEY: password
+      AWS_REGION: us-east-1
+      S3_ENDPOINT: http://minio:9000
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/2.1/unity-catalog/"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Labels Proxy — enriches IRC responses with labels
+  labels-proxy:
+    build: ./labels-proxy
+    ports:
+      - "8181:8181"
+    environment:
+      UPSTREAM_CATALOG_URL: http://uc:8080
+      LABELS_CONFIG_PATH: /app/labels_config.yaml
+    depends_on:
+      uc:
+        condition: service_healthy
+
+  # ClickHouse — OLAP engine consuming Iceberg via IRC
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    ports:
+      - "8123:8123"  # HTTP
+      - "9009:9000"  # Native (remapped to avoid MinIO conflict)
+    environment:
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ""
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./setup/clickhouse-init.sql:/docker-entrypoint-initdb.d/init.sql
+    depends_on:
+      - labels-proxy
+
+  # Jupyter notebook for the demo
+  notebook:
+    image: quay.io/jupyter/scipy-notebook:latest
+    ports:
+      - "8888:8888"
+    environment:
+      JUPYTER_TOKEN: demo
+      IRC_URL: http://labels-proxy:8181
+      IRC_CATALOG: unity
+      IRC_NAMESPACE: healthcare
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+    volumes:
+      - ./notebook:/home/jovyan/work
+      - ./agent:/home/jovyan/work/agent
+    depends_on:
+      - labels-proxy
+      - clickhouse
+    command: >
+      bash -c "pip install httpx openai duckdb clickhouse-connect &&
+               pip install 'pyiceberg[s3] @ git+https://github.com/laskoviymishka/iceberg-python.git@labels-demo' &&
+               start-notebook.py --NotebookApp.token='demo' --ServerApp.root_dir=/home/jovyan/work"
+
+volumes:
+  minio-data:
+  clickhouse-data:

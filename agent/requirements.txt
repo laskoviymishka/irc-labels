@@ -1,0 +1,4 @@
+httpx==0.28.1
+openai==1.61.0
+duckdb==1.2.1
+clickhouse-connect==0.8.14

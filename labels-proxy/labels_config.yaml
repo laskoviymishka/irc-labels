@@ -1,0 +1,107 @@
+# Label definitions for the healthcare demo
+# These would normally come from the catalog's tag system (UC tags, etc.)
+# For the demo, we define them statically to show the protocol.
+
+tables:
+  healthcare.patients:
+    table:
+      sensitivity: "restricted"
+      regulatory_scope: "HIPAA"
+      domain: "healthcare"
+      description: "Patient PII and clinical records — source of truth for patient data"
+      tier: "gold"
+      owner_team: "clinical-data-eng"
+      system.pii_detected: "true"
+    columns:
+      - field-id: 1
+        labels:
+          semantic_type: "identifier"
+          meaning: "Unique patient identifier"
+          sensitivity: "medium"
+      - field-id: 2
+        labels:
+          pii_type: "full_name"
+          meaning: "Patient full legal name"
+          sensitivity: "high"
+      - field-id: 3
+        labels:
+          pii_type: "email"
+          meaning: "Patient contact email address"
+          sensitivity: "high"
+      - field-id: 4
+        labels:
+          phi_type: "clinical_diagnosis"
+          meaning: "Primary diagnosis ICD-10 description"
+          sensitivity: "restricted"
+      - field-id: 5
+        labels:
+          pii_type: "date_of_birth"
+          meaning: "Patient date of birth"
+          sensitivity: "high"
+      - field-id: 6
+        labels:
+          semantic_type: "identifier"
+          meaning: "Insurance provider ID"
+          sensitivity: "medium"
+
+  healthcare.visits_summary:
+    table:
+      sensitivity: "low"
+      domain: "healthcare"
+      tier: "gold"
+      data_quality_score: "0.99"
+      freshness: "daily"
+      description: "Aggregated visit metrics by department — no PII, safe for broad analytics"
+      owner_team: "analytics-eng"
+    columns:
+      - field-id: 1
+        labels:
+          meaning: "Date of visits (aggregation key)"
+          semantic_type: "date"
+      - field-id: 2
+        labels:
+          meaning: "Hospital department name"
+          semantic_type: "category"
+      - field-id: 3
+        labels:
+          meaning: "Total number of patient visits"
+          semantic_type: "count"
+      - field-id: 4
+        labels:
+          meaning: "Average patient wait time in minutes"
+          semantic_type: "duration_minutes"
+      - field-id: 5
+        labels:
+          meaning: "Patient satisfaction score (0-5 scale)"
+          semantic_type: "score"
+
+  healthcare.billing:
+    table:
+      sensitivity: "medium"
+      regulatory_scope: "SOX"
+      domain: "finance"
+      description: "Billing records — financial data under SOX compliance, contains invoice amounts"
+      tier: "silver"
+      owner_team: "finance-eng"
+    columns:
+      - field-id: 1
+        labels:
+          meaning: "Unique invoice identifier"
+          semantic_type: "identifier"
+      - field-id: 2
+        labels:
+          meaning: "Patient ID (foreign key to patients table)"
+          semantic_type: "foreign_key"
+          sensitivity: "medium"
+      - field-id: 3
+        labels:
+          meaning: "Invoice amount in USD"
+          semantic_type: "currency_usd"
+      - field-id: 4
+        labels:
+          meaning: "Insurance provider billing code"
+          semantic_type: "code"
+      - field-id: 5
+        labels:
+          meaning: "Date invoice was generated"
+          semantic_type: "date"
