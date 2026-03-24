@@ -1,4 +1,49 @@
 services:
+  # PostgreSQL for Lakekeeper catalog store
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_PASSWORD: postgres
+      PGDATA: /var/lib/postgresql/data/pgdata
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -p 5432 -d postgres"]
+      interval: 2s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+
+  # Lakekeeper DB migration
+  migrate:
+    image: &lk-image quay.io/lakekeeper/catalog:latest-main
+    environment: &lk-env
+      LAKEKEEPER__PG_ENCRYPTION_KEY: "demo-not-secure"
+      LAKEKEEPER__PG_DATABASE_URL_READ: "postgresql://postgres:postgres@db:5432/postgres"
+      LAKEKEEPER__PG_DATABASE_URL_WRITE: "postgresql://postgres:postgres@db:5432/postgres"
+      LAKEKEEPER__AUTHZ_BACKEND: allowall
+    command: ["migrate"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Lakekeeper — Iceberg REST Catalog (full read+write IRC)
+  lakekeeper:
+    image: *lk-image
+    environment: *lk-env
+    command: ["serve"]
+    ports:
+      - "8181:8181"
+    healthcheck:
+      test: ["CMD", "/home/nonroot/lakekeeper", "healthcheck"]
+      interval: 2s
+      timeout: 10s
+      retries: 10
+      start_period: 5s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
   # S3-compatible storage for Iceberg data files
   minio:
     image: minio/minio:latest
@@ -17,7 +62,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # Create default bucket on startup
   minio-init:
     image: minio/mc:latest
     depends_on:
@@ -28,67 +72,37 @@ services:
       mc alias set myminio http://minio:9000 admin password;
       mc mb myminio/warehouse --ignore-existing;
       mc anonymous set public myminio/warehouse;
-      echo 'MinIO bucket ready';
       "
-
-  # Unity Catalog OSS — Iceberg REST Catalog
-  uc:
-    image: unitycatalog/unitycatalog:latest
-    ports:
-      - "8080:8080"
-    environment:
-      AWS_ACCESS_KEY_ID: admin
-      AWS_SECRET_ACCESS_KEY: password
-      AWS_REGION: us-east-1
-      S3_ENDPOINT: http://minio:9000
-    depends_on:
-      minio-init:
-        condition: service_completed_successfully
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/api/2.1/unity-catalog/"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
 
   # Labels Proxy — enriches IRC responses with labels
   labels-proxy:
     build: ./labels-proxy
     ports:
-      - "8181:8181"
+      - "8182:8182"
     environment:
-      UPSTREAM_CATALOG_URL: http://uc:8080
+      UPSTREAM_CATALOG_URL: http://lakekeeper:8181
       LABELS_CONFIG_PATH: /app/labels_config.yaml
     depends_on:
-      uc:
+      lakekeeper:
         condition: service_healthy
+    restart: on-failure
 
-  # ClickHouse — OLAP engine consuming Iceberg via IRC
+  # ClickHouse — OLAP engine
   clickhouse:
     image: clickhouse/clickhouse-server:latest
     ports:
-      - "8123:8123"  # HTTP
-      - "9009:9000"  # Native (remapped to avoid MinIO conflict)
-    environment:
-      CLICKHOUSE_USER: default
-      CLICKHOUSE_PASSWORD: ""
-    volumes:
-      - clickhouse-data:/var/lib/clickhouse
-      - ./setup/clickhouse-init.sql:/docker-entrypoint-initdb.d/init.sql
+      - "8123:8123"
+      - "9009:9000"
     depends_on:
       - labels-proxy
 
-  # Jupyter notebook for the demo
+  # Jupyter notebook
   notebook:
     image: quay.io/jupyter/scipy-notebook:latest
     ports:
       - "8888:8888"
     environment:
       JUPYTER_TOKEN: demo
-      IRC_URL: http://labels-proxy:8181
-      IRC_CATALOG: unity
-      IRC_NAMESPACE: healthcare
-      CLICKHOUSE_HOST: clickhouse
-      CLICKHOUSE_PORT: "8123"
     volumes:
       - ./notebook:/home/jovyan/work
       - ./agent:/home/jovyan/work/agent
@@ -96,10 +110,11 @@ services:
       - labels-proxy
       - clickhouse
     command: >
-      bash -c "pip install httpx openai duckdb clickhouse-connect &&
-               pip install 'pyiceberg[s3] @ git+https://github.com/laskoviymishka/iceberg-python.git@labels-demo' &&
+      bash -c "pip install httpx duckdb clickhouse-connect 2>/dev/null;
+               pip install openai 2>/dev/null || echo 'openai not available - AI agent cells will be skipped';
+               pip install 'pyiceberg[s3] @ git+https://github.com/laskoviymishka/iceberg-python.git@labels-demo' 2>/dev/null || pip install 'pyiceberg[s3]' 2>/dev/null || echo 'pyiceberg install failed';
                start-notebook.py --NotebookApp.token='demo' --ServerApp.root_dir=/home/jovyan/work"
 
 volumes:
+  pg-data:
   minio-data:
-  clickhouse-data:

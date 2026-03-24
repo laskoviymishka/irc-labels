@@ -82,6 +82,10 @@ sequenceDiagram
 
 ## Demo Notebooks
 
+### [`setup.ipynb`](notebook/setup.ipynb) — Run First
+- Creates Lakekeeper warehouse with S3 (MinIO) storage
+- Creates `healthcare` namespace + 3 tables with synthetic data
+
 ### [`demo.ipynb`](notebook/demo.ipynb) — General Use Cases
 - **Part 1**: Labels in the IRC protocol
 - **Part 2**: Ownership tracking — machine-readable, always current
@@ -102,6 +106,7 @@ sequenceDiagram
 ```bash
 docker-compose up -d
 # Open http://localhost:8888 (token: demo)
+# Run setup.ipynb first (creates warehouse + tables), then demo.ipynb or governance.ipynb
 ```
 
 ## Scenario: Healthcare Data Lake
@@ -114,10 +119,11 @@ docker-compose up -d
 
 ## Stack
 
-- **UC OSS** — Iceberg REST Catalog
+- **Lakekeeper** — Iceberg REST Catalog (full read+write IRC)
 - **Labels Proxy** — FastAPI, enriches IRC responses with labels
 - **ClickHouse** — OLAP engine with RBAC, masking, governed views
 - **DuckDB** — Embedded engine, reads via IRC
+- **MinIO** — S3-compatible storage for Iceberg data files
 - **PyIceberg** — Python client with `table.labels` support (forked)
 - **AI Agent** — Vendor-neutral LLM (Claude, OpenAI, Ollama)
 

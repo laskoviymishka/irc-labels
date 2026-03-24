@@ -17,11 +17,9 @@ import yaml
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
-UPSTREAM_CATALOG = os.environ.get("UPSTREAM_CATALOG_URL", "http://uc:8080")
-ICEBERG_PREFIX = os.environ.get(
-    "ICEBERG_API_PREFIX", "/api/2.1/unity-catalog/iceberg"
-)
+UPSTREAM_CATALOG = os.environ.get("UPSTREAM_CATALOG_URL", "http://polaris:8181")
 CONFIG_PATH = os.environ.get("LABELS_CONFIG_PATH", "/app/labels_config.yaml")
+PROXY_PORT = int(os.environ.get("PROXY_PORT", "8182"))
 
 app = FastAPI(title="IRC Labels Proxy", version="0.1.0")
 
@@ -123,6 +121,17 @@ def is_load_table_request(method: str, path: str) -> tuple[bool, str, str, str]:
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "HEAD", "PATCH"])
 async def proxy(request: Request, path: str):
     """Proxy all requests to upstream catalog, enriching LoadTable responses."""
+    # Handle local label endpoints before proxying
+    if path == "labels":
+        return _labels_store
+    if path.startswith("labels/flat/"):
+        ns = path.split("/", 2)[2]
+        return await get_flat_labels(ns)
+    if path.startswith("labels/"):
+        parts = path.split("/")
+        if len(parts) == 3:  # labels/{namespace}/{table}
+            return await get_table_labels(parts[1], parts[2])
+
     upstream_url = f"{UPSTREAM_CATALOG}/{path}"
 
     # Forward query params
