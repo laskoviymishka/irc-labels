@@ -155,6 +155,20 @@ async def proxy(request: Request, path: str):
             content=body if body else None,
         )
 
+    # Rewrite config response: replace upstream URI with proxy URI so PyIceberg
+    # continues to route through the proxy for subsequent requests (table loads etc)
+    if path.endswith("/config") and resp.status_code == 200:
+        try:
+            resp_body = resp.json()
+            overrides = resp_body.get("overrides", {})
+            if "uri" in overrides:
+                proxy_base = f"http://{request.headers.get('host', 'localhost:8182')}"
+                overrides["uri"] = proxy_base + "/catalog"
+                resp_body["overrides"] = overrides
+                return JSONResponse(content=resp_body)
+        except Exception:
+            pass
+
     # Check if this is a LoadTable response we should enrich
     full_path = f"/{path}"
     is_load, catalog, namespace, table = is_load_table_request(request.method, full_path)
@@ -163,19 +177,19 @@ async def proxy(request: Request, path: str):
         try:
             resp_body = resp.json()
             enriched = enrich_response(resp_body, catalog, namespace, table)
-            return JSONResponse(
-                content=enriched,
-                status_code=resp.status_code,
-                headers=dict(resp.headers),
-            )
+            return JSONResponse(content=enriched, status_code=resp.status_code)
         except (json.JSONDecodeError, Exception):
             pass
 
-    # Pass through unmodified
+    # Pass through — strip content-encoding since httpx already decompressed
+    fwd_headers = {
+        k: v for k, v in resp.headers.items()
+        if k.lower() not in ("content-encoding", "content-length", "transfer-encoding")
+    }
     return Response(
         content=resp.content,
         status_code=resp.status_code,
-        headers=dict(resp.headers),
+        headers=fwd_headers,
         media_type=resp.headers.get("content-type"),
     )
 

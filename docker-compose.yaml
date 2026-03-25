@@ -98,9 +98,12 @@ services:
 
   # Jupyter notebook
   notebook:
-    image: quay.io/jupyter/scipy-notebook:latest
+    image: quay.io/jupyter/scipy-notebook:python-3.12
     ports:
       - "8888:8888"
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     environment:
       JUPYTER_TOKEN: demo
     volumes:
@@ -109,11 +112,7 @@ services:
     depends_on:
       - labels-proxy
       - clickhouse
-    command: >
-      bash -c "pip install httpx duckdb clickhouse-connect 2>/dev/null;
-               pip install openai 2>/dev/null || echo 'openai not available - AI agent cells will be skipped';
-               pip install 'pyiceberg[s3] @ git+https://github.com/laskoviymishka/iceberg-python.git@labels-demo' 2>/dev/null || pip install 'pyiceberg[s3]' 2>/dev/null || echo 'pyiceberg install failed';
-               start-notebook.py --NotebookApp.token='demo' --ServerApp.root_dir=/home/jovyan/work"
+    command: ["bash", "-c", "python3 /home/jovyan/work/install.py && start-notebook.py --NotebookApp.token=demo --ServerApp.root_dir=/home/jovyan/work"]
 
 volumes:
   pg-data:
