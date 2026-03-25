@@ -95,7 +95,10 @@ def create_tables(catalog_url: str):
         "s3.access-key-id": "admin",
         "s3.secret-access-key": "password",
         "s3.region": "us-east-1",
+        "s3.path-style-access": "true",
     })
+    # Override: disable vended credentials so PyIceberg uses our local S3 config
+    catalog.properties["s3.remote-signing-enabled"] = "false"
 
     # Namespace
     try:

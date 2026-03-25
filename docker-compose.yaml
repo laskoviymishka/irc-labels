@@ -93,6 +93,9 @@ services:
     ports:
       - "8123:8123"
       - "9009:9000"
+    environment:
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+      CLICKHOUSE_PASSWORD: "demo"
     depends_on:
       - labels-proxy
 
@@ -108,7 +111,6 @@ services:
       JUPYTER_TOKEN: demo
     volumes:
       - ./notebook:/home/jovyan/work
-      - ./agent:/home/jovyan/work/agent
     depends_on:
       - labels-proxy
       - clickhouse

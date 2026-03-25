@@ -82,11 +82,16 @@ def generate_governed_view(ch_client, database: str, table_name: str, role: str 
     - Columns with sensitivity=restricted → blocked (NULL) for non-admin roles
     - Other columns → pass through
     """
-    # Get schema from ClickHouse
+    # In ClickHouse DataLakeCatalog, table names include the namespace:
+    # e.g. "healthcare.patients" as the table name inside database "healthcare"
+    ch_table = f"{database}.{table_name}"
+
+    # Get schema via DESCRIBE (system.columns doesn't see DataLakeCatalog tables)
     columns = ch_client.query(
-        f"SELECT name, type FROM system.columns "
-        f"WHERE database = '{database}' AND table = '{table_name}'"
+        f"DESCRIBE {database}.`{ch_table}`"
     ).result_rows
+    # DESCRIBE returns (name, type, default_type, default_expr, comment, codec, ttl)
+    columns = [(row[0], row[1]) for row in columns]
 
     if not columns:
         return None
@@ -131,9 +136,10 @@ def generate_governed_view(ch_client, database: str, table_name: str, role: str 
     select = ",\n    ".join(col_exprs)
     view_name = f"governed_{table_name}"
 
+    # Create view in default database (DataLakeCatalog databases don't support views)
     ddl = (
-        f"CREATE OR REPLACE VIEW {database}.{view_name} AS\n"
-        f"SELECT\n    {select}\nFROM {database}.{table_name}"
+        f"CREATE OR REPLACE VIEW default.`{view_name}` AS\n"
+        f"SELECT\n    {select}\nFROM {database}.`{ch_table}`"
     )
     ch_client.command(ddl)
     return view_name, ddl
