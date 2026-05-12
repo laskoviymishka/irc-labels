@@ -1,0 +1,105 @@
+services:
+  # PostgreSQL for Lakekeeper catalog store
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_PASSWORD: postgres
+      PGDATA: /var/lib/postgresql/data/pgdata
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -p 5432 -d postgres"]
+      interval: 2s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+
+  # Lakekeeper DB migration (runs migrate then exits).
+  # Builds from the labels-crud-verb branch — includes the new
+  # api_endpoints enum values for V1_LOAD_LABELS / V1_UPDATE_LABELS.
+  migrate:
+    build:
+      context: ${LAKEKEEPER_SRC:-../../lakekeeper}
+      dockerfile: ${PWD:-.}/lakekeeper.Dockerfile
+    image: lakekeeper-labels:latest
+    environment: &lk-env
+      LAKEKEEPER__PG_ENCRYPTION_KEY: "demo-not-secure"
+      LAKEKEEPER__PG_DATABASE_URL_READ: "postgresql://postgres:postgres@db:5432/postgres"
+      LAKEKEEPER__PG_DATABASE_URL_WRITE: "postgresql://postgres:postgres@db:5432/postgres"
+      LAKEKEEPER__AUTHZ_BACKEND: allowall
+    command: ["migrate"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Lakekeeper — IRC catalog with the labels CRUD endpoints
+  lakekeeper:
+    image: lakekeeper-labels:latest
+    environment: *lk-env
+    command: ["serve"]
+    ports:
+      - "8181:8181"
+    healthcheck:
+      test: ["CMD", "/home/nonroot/lakekeeper", "healthcheck"]
+      interval: 2s
+      timeout: 10s
+      retries: 10
+      start_period: 5s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  # S3-compatible storage for Iceberg data files
+  minio:
+    image: minio/minio:latest
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: password
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set myminio http://minio:9000 admin password;
+      mc mb myminio/warehouse --ignore-existing;
+      mc anonymous set public myminio/warehouse;
+      "
+
+  # Jupyter notebook — drives the demo via direct REST calls
+  notebook:
+    image: quay.io/jupyter/scipy-notebook:python-3.12
+    ports:
+      - "8888:8888"
+    environment:
+      JUPYTER_TOKEN: demo
+      LAKEKEEPER_URL: http://lakekeeper:8181
+      MINIO_URL: http://minio:9000
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: password
+      WAREHOUSE_NAME: ${WAREHOUSE_NAME:-labels-demo}
+      NAMESPACE: ${NAMESPACE:-sales}
+      TABLE: ${TABLE:-orders}
+    volumes:
+      - ./notebook:/home/jovyan/work
+    depends_on:
+      lakekeeper:
+        condition: service_healthy
+    command: ["bash", "-c", "python3 /home/jovyan/work/install.py && start-notebook.py --NotebookApp.token=demo --ServerApp.root_dir=/home/jovyan/work"]
+
+volumes:
+  pg-data:
+  minio-data:
