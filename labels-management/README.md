@@ -80,12 +80,20 @@ labels-management/
 ├── docker-compose.yaml              # services + build directives
 ├── lakekeeper.Dockerfile            # Rust release build of Lakekeeper from PR 2 source
 ├── .env.example                     # LAKEKEEPER_SRC pointer + warehouse defaults
+├── design/
+│   ├── README.md                    # cross-PR map + branch links + sequencing
+│   ├── lakekeeper-design.md         # catalog reference impl (PR 2) design notes
+│   └── trino-design.md              # ALTER TABLE ... SET LABEL design notes (PR 4)
 └── notebook/
     ├── labels-management.ipynb      # the demo walkthrough
     ├── irc_labels_client.py         # thin Python client for IRC labels endpoints
     ├── install.py                   # pip install requirements on container start
     └── requirements.txt
 ```
+
+For the design-level deep-dives on each implementation PR, see
+[`design/`](design/). The cross-PR map with all branch + commit links is in
+[`design/README.md`](design/README.md).
 
 ## Scenarios in the notebook
 
